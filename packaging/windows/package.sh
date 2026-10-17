@@ -94,7 +94,7 @@ done
 find "$dest" -name __pycache__ -prune -exec rm -r {} +
 # Read the launcher constant without importing the GUI or maintaining another version number.
 version=$(out/pyenv/Scripts/python.exe -c \
-    'import ast, pathlib, re; tree = ast.parse(pathlib.Path("launcher/uncharted_launcher.py").read_text(encoding="utf-8")); version = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "VERSION" for t in n.targets)); assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version), "Expected a numeric major.minor.patch version"; print(version)' | tr -d '\r')
+    'import ast, pathlib, re; tree = ast.parse(pathlib.Path("launcher/uncharted_launcher.py").read_text(encoding="utf-8")); version = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "VERSION" for t in n.targets)); assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+", version), "Expected upstream major.minor.patch plus fork revision"; print(version)' | tr -d '\r')
 printf '%s\n' "$version" > "$dest/VERSION.txt"
 archive="dist/uncharted-windows-v$version.zip"
 mkdir -p dist

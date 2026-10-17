@@ -2,7 +2,10 @@
 
 ## Versioning
 
-- Increase the patch component of `VERSION` in `launcher/uncharted_launcher.py` for every user-facing update delivered to this user, including local builds.
-- Bump once per delivered update, not once per commit or rebuild of the same update. Use a minor or major bump only when requested or justified by a larger change.
+- Use four numeric components for `VERSION` in `launcher/uncharted_launcher.py`: `<upstream major>.<upstream minor>.<upstream patch>.<fork revision>`.
+- The first three components identify the upstream Supermedo/uncharted_pc release actually integrated into this fork. Check upstream releases before each update; do not advance that prefix just because a newer upstream release exists without integrating it.
+- Current upstream base is `0.3.3`; the first release under this scheme is `0.3.3.8`, renumbering the existing `0.3.8` fork build. Increase only the fourth component for each subsequent user-facing fork update, including local builds.
+- When adopting upstream `0.3.4`, `0.4.0`, or another release, match those first three components and restart the fork revision at `1` (for example `0.3.4.1` or `0.4.0.1`).
+- Bump once per delivered update, not once per commit or rebuild of the same update.
 - Treat the launcher constant as the source of truth. The Windows packaging script derives the ZIP filename and packaged `VERSION.txt` from it.
 - Preserve ZIPs from previous versions. Do not publish a GitHub release unless the user requests one.

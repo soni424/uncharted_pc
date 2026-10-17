@@ -1,12 +1,14 @@
 # Uncharted: The Nathan Drake Collection for Windows
 
+This fork uses **upstream version + fork revision**: `0.3.3.8` is upstream `0.3.3` with fork revision `8`. Further fork updates increment the last number. When a newer upstream release is integrated, the prefix follows it and the revision starts at `1` (for example `0.3.4.1` or `0.4.0.1`). Built-in updates come from this fork.
+
 **Uncharted 1, 2 and 3 from the PS4 collection running natively on Windows 10 and 11, by [SuperMedo](https://github.com/Supermedo).** Mohammed Albarghouthi
 
 Same idea as my [Bloodborne port](https://github.com/Supermedo/bloodborne_pc): the original PS4 game
 code runs directly on your PC and the graphics are translated to Vulkan. Unpack the zip, start
 `Uncharted.exe`, pick your game folder, choose a game and press **PLAY**.
 
-**[Download the latest version](https://github.com/Supermedo/uncharted_pc/releases/latest)** · **[Join the Discord](https://discord.gg/s3RgH6cRfJ)**
+**[Download the latest version](https://github.com/soni424/uncharted_pc/releases/latest)** · **[Join the Discord](https://discord.gg/s3RgH6cRfJ)**
 
 > **No game files are included.** You need your own decrypted dump of the collection
 > (CUSA02343, CUSA02320, ...: the folder with eboot.bin, big2-ps4_Shipping.elf,

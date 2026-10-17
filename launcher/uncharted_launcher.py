@@ -39,10 +39,10 @@ CONFIG_DIR = Path(os.environ.get('APPDATA', Path.home())) / 'uncharted-launcher'
 CONFIG_FILE = CONFIG_DIR / 'settings.json'
 NAME = 'Uncharted'
 AUTHOR = 'SuperMedo'
-# This build; GitHub release tags are v<VERSION> (their digits are compared).
-VERSION = '0.3.8'
-RELEASES_API = 'https://api.github.com/repos/Supermedo/uncharted_pc/releases/latest'
-RELEASES_PAGE = 'https://github.com/Supermedo/uncharted_pc/releases/latest'
+# Upstream release plus this fork's revision; GitHub tags are v<VERSION>.
+VERSION = '0.3.3.8'
+RELEASES_API = 'https://api.github.com/repos/soni424/uncharted_pc/releases/latest'
+RELEASES_PAGE = 'https://github.com/soni424/uncharted_pc/releases/latest'
 UPDATE_DIR = Path(tempfile.gettempdir()) / 'uncharted-update'
 # Never copied over an installation by an update (the package does not hold them either).
 USER_FILES = ('user', 'out', 'art', 'bbport.ini', 'input.ini', 'last_run.log')
