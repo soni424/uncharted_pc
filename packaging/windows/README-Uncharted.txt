@@ -12,6 +12,14 @@ Requirements
 - About 8 GB of free memory (RAM + page file).
   Nothing else: Python and the libraries are inside this folder.
 
+Save backups and cheats
+- The Saves page exports save data and trophies to a ZIP, excluding shader caches.
+  Close the game first. Restoring asks for confirmation and backs up the current
+  saves to the user data folder's backups directory before replacing them.
+- The Cheats page offers Infinite Health and Infinite Ammo separately for each game.
+  They are off by default and apply on the next game launch. Supported executable
+  fingerprints are CUSA02320 v1.00 and v1.02; unknown or changed code is skipped.
+
 Starting
 - Uncharted.exe opens the launcher. On the Game page choose your game folder, pick
   Drake's Fortune, Among Thieves or Drake's Deception on the Play page and press PLAY.

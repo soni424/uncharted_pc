@@ -53,19 +53,22 @@ class GameFolderTests(unittest.TestCase):
 
     def test_loadexec_uses_separate_folder_and_keeps_canonical_game_identity(self):
         settings = {**launcher.APP_DEFAULTS, 'game_dir': str(self.collection),
-                    'game_dir_u2': str(self.separate), 'fps_limit': '45'}
+                    'game_dir_u2': str(self.separate), 'fps_limit': '45',
+                    'u1_infinite_health': True, 'u2_infinite_ammo': True}
         with patch.object(launcher, 'write_input_ini', return_value=self.root / 'input.ini'):
             env = launcher.game_environment(settings)
         env.update(BB_DATA_DIR=str(self.root), BB_USER_DIR=str(self.root / 'user'),
                    BB_PROBE=str(self.root / 'probe.exe'), BB_EXE='u1')
         (self.root / 'probe.exe').touch()
         commands = []
+        selected_cheats = []
 
         def prepare(folder, exe, out):
             out.mkdir(parents=True, exist_ok=True)
 
         def execute(command, **kwargs):
             commands.append(command)
+            selected_cheats.append(os.environ['BB_CHEATS'])
             if len(commands) == 1:
                 (self.root / 'out' / 'loadexec.txt').write_text(
                     '/app0/big2-ps4_Shipping.elf\nargument\n', encoding='utf-8')
@@ -77,11 +80,14 @@ class GameFolderTests(unittest.TestCase):
             with patch.object(run, 'PORT', self.root), patch.dict(os.environ, env, clear=True), \
                     patch.object(sys, 'argv', ['run.py']), patch.object(run, 'no_console', return_value=0), \
                     patch.object(run, 'prepare', side_effect=prepare) as preparation, \
-                    patch.object(run, 'run_script'), patch.object(run.subprocess, 'run', side_effect=execute):
+                    patch.object(run, 'run_script'), patch.object(run.cheats, 'build', return_value=None) as cheats, \
+                    patch.object(run.subprocess, 'run', side_effect=execute):
                 self.assertEqual(run.main(), 0)
                 self.assertEqual(os.environ['BB_EXE'], 'big2-ps4_Shipping.elf')
                 self.assertEqual(os.environ['BB_FPS_LIMIT'], '45')
                 self.assertEqual(os.environ['PYTHONUTF8'], '1')
+                self.assertEqual(cheats.call_args_list[1].args[0], self.separate / 'eboot.bin')
+                self.assertEqual(selected_cheats, ['health', 'ammo'])
             self.assertEqual([c[c.index('--app0') + 1] for c in commands],
                              [str(self.collection), str(self.separate)])
             self.assertEqual(preparation.call_args_list[1].args[:2], (self.separate, 'eboot.bin'))

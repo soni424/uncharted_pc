@@ -39,7 +39,7 @@ CONFIG_FILE = CONFIG_DIR / 'settings.json'
 NAME = 'Uncharted'
 AUTHOR = 'SuperMedo'
 # This build; GitHub release tags are v<VERSION> (their digits are compared).
-VERSION = '0.3.4'
+VERSION = '0.3.5'
 RELEASES_API = 'https://api.github.com/repos/Supermedo/uncharted_pc/releases/latest'
 RELEASES_PAGE = 'https://github.com/Supermedo/uncharted_pc/releases/latest'
 UPDATE_DIR = Path(tempfile.gettempdir()) / 'uncharted-update'
@@ -147,7 +147,8 @@ APP_DEFAULTS = {'game_dir': '', 'game_dir_u1': '', 'game_dir_u2': '', 'game_dir_
                 'pad_invert_y': False, 'key_bindings': {}, 'pad_bindings': {}, 'check_updates': True,
                 'art_banner': '', 'art_u1': '', 'art_u2': '', 'art_u3': '', 'steam_art': '',
                 'art_crops': {}, 'shortcut_name': 'Uncharted: The Nathan Drake Collection',
-                'shortcut_icon': ''}
+                'shortcut_icon': '', 'window_maximized': False,
+                **{f'{game}_infinite_{cheat}': False for game, _t, _s, _e in GAMES for cheat in ('health', 'ammo')}}
 
 
 UI_LANGUAGE = 'en'
@@ -364,6 +365,8 @@ def game_environment(s, start=None):
     env['BB_FSR_SHARPNESS'] = str(s.get('aa_sharpness') or '0')
     env['BB_FRAME_GEN'] = str(s.get('frame_generation') or 'off')
     env['BB_FRAME_GEN_MULTIPLIER'] = str(s.get('frame_gen_multiplier') or '2')
+    env['BB_CHEATS'] = ','.join(f'{game}:{cheat}' for game, _t, _s, _e in GAMES for cheat in ('health', 'ammo')
+                                if s.get(f'{game}_infinite_{cheat}'))
     for item in str(s['extra_env']).split():
         if '=' in item:
             key, value = item.split('=', 1)
@@ -384,8 +387,8 @@ COLORS = {'surface': SURFACE, 'card': CARD, 'card_hi': CARD_HI, 'line': LINE, 't
           'gold': GOLD, 'gold_hi': GOLD_HI, 'track': '#2c2e33', 'knob': '#9a958b', 'knob_on': '#f7f1e2',
           'button': '#25272b', 'button_hi': '#30333a'}
 # Sidebar icons (Segoe Fluent Icons on Windows 11, Segoe MDL2 Assets on Windows 10).
-NAV_ICONS = {'play': '\ue768', 'game': '\ue7fc', 'display': '\ue7f4', 'controls': '\ue765',
-             'advanced': '\ue713', 'log': '\ue8a5'}
+NAV_ICONS = {'saves': '\ue74e', 'play': '\ue768', 'game': '\ue7fc', 'display': '\ue7f4', 'controls': '\ue765',
+             'cheats': '\ue734', 'saves': '\ue74e', 'advanced': '\ue713', 'log': '\ue8a5'}
 RUST, RUST_HI = GOLD, GOLD_HI
 DWM_USE_IMMERSIVE_DARK_MODE = 20
 DWM_USE_IMMERSIVE_DARK_MODE_LEGACY = 19
@@ -432,6 +435,72 @@ def set_dark_title_bar(window):
     return dark_mode or (caption and text)
 
 
+# The launcher UI follows Windows' scale. The process stays system-DPI aware (main), so Windows does
+# not scale the window itself; the UI scale only drops when the base window would not fit the work area.
+BASE_WINDOW = (1180, 860)
+UI_SCALE_STEP = 0.05
+WORK_AREA_SHARE = 0.96
+SPI_GETWORKAREA = 0x0030
+SM_CYCAPTION, SM_CXSIZEFRAME, SM_CYSIZEFRAME, SM_CXPADDEDBORDER = 4, 32, 33, 92
+
+
+def fit_scale(area, frame):
+    """The largest UI scale at which the base window fits WORK_AREA_SHARE of the work area."""
+    width = (WORK_AREA_SHARE * (area[2] - area[0]) - frame[0]) / BASE_WINDOW[0]
+    height = (WORK_AREA_SHARE * (area[3] - area[1]) - frame[1]) / BASE_WINDOW[1]
+    return min(width, height)
+
+
+def ui_scale_for(monitor_scale, fit):
+    """Windows' scale, or the largest 5% step within the fit scale when that is lower (not below 100%)."""
+    if fit >= monitor_scale:
+        return monitor_scale
+    steps = int(fit / UI_SCALE_STEP + 1e-9)
+    return max(min(monitor_scale, 1.0), round(steps * UI_SCALE_STEP, 2))
+
+
+def work_area():
+    """(left, top, right, bottom) of the primary monitor's work area, in pixels (no taskbar)."""
+    rect = (ctypes.c_long * 4)()
+    ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, rect, 0)
+    return tuple(rect)
+
+
+def window_frame():
+    """(width, height) that the window border and title bar add to the client area."""
+    metric = ctypes.windll.user32.GetSystemMetrics
+    border = metric(SM_CXPADDEDBORDER)
+    return 2 * (metric(SM_CXSIZEFRAME) + border), metric(SM_CYCAPTION) + 2 * (metric(SM_CYSIZEFRAME) + border)
+
+
+def work_metrics():
+    """(work area, window frame), or (None, None) where the Windows API is not available."""
+    try:
+        return work_area(), window_frame()
+    except (AttributeError, OSError):
+        return None, None
+
+
+def fit_to_area(size, minimum, area, frame):
+    """The client size and minimum size, clamped to the work area minus the window frame."""
+    max_w = area[2] - area[0] - frame[0]
+    max_h = area[3] - area[1] - frame[1]
+    return ((min(size[0], max_w), min(size[1], max_h)),
+            (min(minimum[0], max_w), min(minimum[1], max_h)))
+
+
+def centered_origin(size, frame, area):
+    """The top-left corner that centers the window (client size plus frame) in the work area."""
+    x = area[0] + (area[2] - area[0] - size[0] - frame[0]) // 2
+    y = area[1] + (area[3] - area[1] - size[1] - frame[1]) // 2
+    return x, y
+
+
+def maximized_after(previous, state):
+    """Whether the window is maximized after a Tk window state; minimized keeps the previous value."""
+    return state == 'zoomed' if state in ('normal', 'zoomed') else previous
+
+
 class Launcher:
     def __init__(self, root, tk, ttk, filedialog, messagebox):
         global UI_LANGUAGE
@@ -452,22 +521,48 @@ class Launcher:
         self.update_info = None
         root.title(f'{NAME} — The Nathan Drake Collection for Windows · by {AUTHOR}')
         root.configure(bg=BG)
-        self.dpi = root.winfo_fpixels('1i') / 96.0
-        root.geometry(f'{self.px(1180)}x{self.px(860)}')
-        root.minsize(self.px(1040), self.px(760))
+        monitor_scale = root.winfo_fpixels('1i') / 96.0
+        self.area, self.frame = work_metrics()
+        self.ui_scale = monitor_scale
+        if self.area:
+            self.ui_scale = ui_scale_for(monitor_scale, fit_scale(self.area, self.frame))
+        root.tk.call('tk', 'scaling', self.ui_scale * 96 / 72)  # fonts are sized in points: follow px()
+        self.size_window()
         self._titlebar_map_binding = root.bind('<Map>', self._on_window_map, add='+')
         self.set_icon()
         self.load_fonts()
         self.style()
         self.build()
         self.show('play')
+        self.content.bind('<Configure>', self.on_content_resize)
+        root.update()
+        for name in self.pages:  # laid out once while hidden, so that showing a page never builds it
+            self.size_page(name)
+        root.update()
         root.protocol('WM_DELETE_WINDOW', self.close)
+        root.bind('<Configure>', self.note_window_state)
         root.after(100, self.drain_output)
         if self.app.get('check_updates', True):
             threading.Thread(target=self.check_update, daemon=True).start()
 
     def px(self, size):
-        return int(size * self.dpi)
+        return int(size * self.ui_scale)
+
+    def size_window(self):
+        size, minimum = (self.px(BASE_WINDOW[0]), self.px(BASE_WINDOW[1])), (self.px(1040), self.px(760))
+        position = ''
+        if self.area:
+            size, minimum = fit_to_area(size, minimum, self.area, self.frame)
+            if not self.app['window_maximized']:
+                position = '+%d+%d' % centered_origin(size, self.frame, self.area)
+        self.root.geometry(f'{size[0]}x{size[1]}{position}')
+        self.root.minsize(*minimum)
+        if self.app['window_maximized']:
+            self.root.state('zoomed')
+
+    def note_window_state(self, event):
+        if event.widget is self.root:
+            self.app['window_maximized'] = maximized_after(self.app['window_maximized'], self.root.state())
 
     def _on_window_map(self, event):
         if event.widget is not self.root:
@@ -518,7 +613,7 @@ class Launcher:
     def check_images(self):
         """16 px (DPI-scaled) check box images: the clam theme draws a cross."""
         tk = self.tk
-        n = max(14, int(16 * self.dpi))
+        n = max(14, int(16 * self.ui_scale))
         images = []
         for checked in (False, True):
             image = tk.PhotoImage(width=n + self.px(8), height=n)
@@ -841,7 +936,11 @@ class Launcher:
         self.page_cards[inner] = None
         window = canvas.create_window(0, 0, window=inner, anchor='nw')
 
-        def fit(_event=None):
+        scheduled = False
+
+        def apply():
+            nonlocal scheduled
+            scheduled = False
             canvas.itemconfigure(window, width=canvas.winfo_width())
             canvas.configure(scrollregion=(0, 0, canvas.winfo_width(), inner.winfo_reqheight()))
             if inner.winfo_reqheight() > canvas.winfo_height():
@@ -849,6 +948,13 @@ class Launcher:
             else:
                 bar.pack_forget()
                 canvas.yview_moveto(0)
+
+        def fit(_event=None):
+            # Tk applies a new window width only on a later idle pass.
+            nonlocal scheduled
+            if not scheduled:
+                scheduled = True
+                canvas.after_idle(apply)
         inner.bind('<Configure>', fit)
         canvas.bind('<Configure>', fit)
 
@@ -891,8 +997,9 @@ class Launcher:
                  anchor='w').pack(anchor='w', padx=18, pady=(1, 0))
         tk.Frame(side, bg=LINE, height=1).pack(fill='x', padx=18, pady=(16, 14))
         self.nav, self.nav_pills, self.nav_icons, self.nav_marks, self.current_page = {}, {}, {}, {}, None
-        for name, title in (('play', _('Play')), ('game', _('Game')), ('display', _('Display')),
-                            ('controls', _('Controls')), ('advanced', _('Advanced')), ('log', _('Log'))):
+        for name, title in (('play', _('Play')), ('game', _('Game')), ('cheats', _('Cheats')),
+                            ('display', _('Display')), ('controls', _('Controls')), ('saves', _('Saves')), ('advanced', _('Advanced')),
+                            ('log', _('Log'))):
             row = tk.Frame(side, bg=BG, cursor='hand2')
             row.pack(fill='x', padx=(0, 12), pady=2)
             mark = tk.Frame(row, bg=BG, width=self.px(3))
@@ -950,9 +1057,18 @@ class Launcher:
         self.build_game()
         self.build_display()
         self.build_controls()
+        self.build_cheats()
+        self.build_saves()
         self.build_advanced()
         self.build_log()
         self.refresh()
+        self.page_sizes = {}
+        focus_classes = ('Label', 'Button', 'Entry', 'Text', 'Checkbutton', 'TButton', 'TCheckbutton', 'TCombobox', 'TEntry')
+        self.focus_order = {name: [(w, w.cget('takefocus')) for w in self.widgets_under(page)
+                                   if w.winfo_class() in focus_classes] for name, page in self.pages.items()}
+        for name, page in self.pages.items():
+            page.place(x=0, y=0)
+            self.set_focusable(name, False)
 
     def _nav_style(self, name, active=False, hover=False):
         if active:
@@ -980,14 +1096,44 @@ class Launcher:
             self.draw_card(name)
 
     def show(self, name):
-        for page in self.pages.values():
-            page.pack_forget()
-        self.pages[name].pack(fill='both', expand=True)
+        previous = self.current_page
+        if name != previous:
+            if previous:
+                self.set_focusable(previous, False)
+                if str(self.root.tk.call('focus')).startswith(str(self.pages[previous]) + '.'):
+                    self.root.focus_set()
+            self.set_focusable(name, True)
+        if self.size_page(name):
+            self.root.update_idletasks()  # the page is laid out while the current page still covers it
+        self.pages[name].tkraise()
         self.current_page = name
         for n in self.nav:
             self._nav_style(n, active=(n == name))
         if name == 'play':
             self.refresh()
+
+    def size_page(self, name):
+        """Sizes a page to the content area; True when the size changed."""
+        size = (self.content.winfo_width(), self.content.winfo_height())
+        if self.page_sizes.get(name) == size:
+            return False
+        self.page_sizes[name] = size
+        self.pages[name].place_configure(width=size[0], height=size[1])
+        return True
+
+    def on_content_resize(self, _event=None):
+        if self.current_page:
+            self.size_page(self.current_page)
+
+    def set_focusable(self, name, on):
+        """Every page stays mapped, so the hidden ones are kept out of the Tab order."""
+        for widget, takefocus in self.focus_order[name]:
+            widget.configure(takefocus=takefocus if on else 0)
+
+    def widgets_under(self, widget):
+        for child in widget.winfo_children():
+            yield child
+            yield from self.widgets_under(child)
 
     def build_play(self):
         tk, ttk = self.tk, self.ttk
@@ -1325,6 +1471,173 @@ class Launcher:
         holder.grid(row=self.next_row(card), column=0, columnspan=2, sticky='w', pady=(12, 0))
         self.pill(holder, _('Default controller buttons'), self.reset_pad).pack(side='left')
 
+    def build_saves(self):
+        f = self.page('saves', _('Saves'),
+                      _('Export your progress to a ZIP file and restore it later.'))
+        self.section(f, _('Portable backup'))
+        self.ttk.Label(
+            f, text=_('The backup includes save data and trophies for the selected user. Shader caches '
+                      'are excluded. Close the game before exporting or restoring.'),
+            style='Muted.TLabel', wraplength=self.px(650), justify='left').grid(
+                row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=(4, 12))
+        buttons = self.tk.Frame(self.target(f), bg=SURFACE)
+        buttons.grid(row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=(4, 10))
+        self.pill(buttons, _('Export backup (.zip)'), self.export_saves, kind='primary',
+                  padding=(18, 9)).pack(side='left')
+        self.pill(buttons, _('Restore backup (.zip)'), self.import_saves,
+                  padding=(18, 9)).pack(side='left', padx=(8, 0))
+        self.pill(buttons, _('Open data folder'),
+                  lambda: self.open_path(self.app.get('user_dir') or DATA_DIR / 'user'),
+                  kind='ghost', padding=(16, 9)).pack(side='left', padx=(8, 0))
+        self.ttk.Label(f, text=_('Restoring creates a backup of your current data before replacing the '
+                                 'items in the ZIP.'), style='Muted.TLabel', wraplength=self.px(650),
+                       justify='left').grid(row=self.next_row(f), column=0, columnspan=2, sticky='w', pady=(0, 8))
+
+
+    def _save_data_roots(self):
+        user = Path(self.current().get('user_dir') or DATA_DIR / 'user').expanduser().resolve()
+        return user, ('savedata', 'trophy')
+
+
+    def _write_save_archive(self, archive_path):
+        user, names = self._save_data_roots()
+        target = Path(archive_path).expanduser().resolve()
+        for name in names:
+            root = user / name
+            if target.is_relative_to(root) or not root.resolve().is_relative_to(user):
+                raise ValueError(_('The ZIP contains an invalid path.'))
+        present = [name for name in names if (user / name).is_dir()]
+        if not present:
+            raise OSError(_('No save data was found yet. Start a game and save once first.'))
+        manifest = {'format': 'uncharted-save-backup-v1', 'created': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                    'folders': present}
+        with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+            archive.writestr('backup_info.json', json.dumps(manifest, indent=2).encode('utf-8'))
+            for name in present:
+                root = user / name
+                archive.writestr(name.rstrip('/') + '/', b'')
+                for path in root.rglob('*'):
+                    if not path.resolve().is_relative_to(user):
+                        raise ValueError(_('The ZIP contains an invalid path.'))
+                    if path.is_file():
+                        archive.write(path, (Path(name) / path.relative_to(root)).as_posix())
+        return manifest
+
+
+    def export_saves(self):
+        if self.process:
+            self.messagebox.showinfo(NAME, _('Close the game before exporting saves.'))
+            return
+        default = 'Uncharted-saves-' + time.strftime('%Y%m%d-%H%M%S') + '.zip'
+        target = self.filedialog.asksaveasfilename(
+            title=_('Export saves'), initialdir=str(Path(self.app.get('user_dir') or DATA_DIR / 'user')),
+            initialfile=default, defaultextension='.zip', filetypes=[(_('ZIP backup'), '*.zip')])
+        if not target:
+            return
+        try:
+            manifest = self._write_save_archive(target)
+        except (OSError, ValueError, zipfile.BadZipFile) as error:
+            self.messagebox.showerror(NAME, _('Could not create the backup: {}').format(error))
+            return
+        self.messagebox.showinfo(NAME, _('Backup created: {}\nFolders included: {}').format(
+            target, ', '.join(manifest['folders'])))
+
+
+    def import_saves(self):
+        if self.process:
+            self.messagebox.showinfo(NAME, _('Close the game before restoring saves.'))
+            return
+        source = self.filedialog.askopenfilename(
+            title=_('Restore saves'), filetypes=[(_('Uncharted backup'), '*.zip')])
+        if not source:
+            return
+        try:
+            with zipfile.ZipFile(source) as archive:
+                manifest = json.loads(archive.read('backup_info.json').decode('utf-8'))
+                if not isinstance(manifest, dict) or manifest.get('format') != 'uncharted-save-backup-v1':
+                    raise ValueError(_('This ZIP is not an Uncharted launcher save backup.'))
+                roots = manifest.get('folders')
+                if (not isinstance(roots, list) or not roots or any(n not in ('savedata', 'trophy') for n in roots)
+                        or len(set(roots)) != len(roots)):
+                    raise ValueError(_('The backup contains no recognized save folders.'))
+                entries = [item for item in archive.infolist() if item.filename != 'backup_info.json']
+                paths = set()
+                for item in entries:
+                    normalized = item.filename.replace('\\', '/')
+                    key = normalized.rstrip('/').casefold()
+                    if key in paths:
+                        raise ValueError(_('The ZIP contains an invalid path.'))
+                    paths.add(key)
+                    parts = normalized.split('/')
+                    if item.filename.startswith('/') or ':' in item.filename or '..' in parts or not parts[0] in roots:
+                        raise ValueError(_('The ZIP contains an invalid path.'))
+                if not any(not item.is_dir() for item in entries):
+                    raise ValueError(_('The backup contains no save files.'))
+                user, _names = self._save_data_roots()
+                if not self.messagebox.askyesno(NAME, _(
+                        'Restore this backup? Your current data will be backed up first.')):
+                    return
+                for name in roots + ['backups']:
+                    if not (user / name).resolve().is_relative_to(user):
+                        raise ValueError(_('The ZIP contains an invalid path.'))
+                user.mkdir(parents=True, exist_ok=True)
+                stamp = time.strftime('%Y%m%d-%H%M%S') + f'-{time.time_ns() % 1_000_000_000:09d}'
+                backups = user / 'backups'
+                backups.mkdir(parents=True, exist_ok=True)
+                current = [n for n in ('savedata', 'trophy') if (user / n).is_dir()]
+                if current:
+                    self._write_save_archive(backups / f'Uncharted-saves-before-restore-{stamp}.zip')
+                with tempfile.TemporaryDirectory(prefix='.uncharted-save-restore-', dir=str(user)) as temp:
+                    stage = Path(temp)
+                    for item in entries:
+                        parts = item.filename.replace('\\', '/').split('/')
+                        if item.is_dir():
+                            (stage.joinpath(*parts)).mkdir(parents=True, exist_ok=True)
+                        else:
+                            output = stage.joinpath(*parts)
+                            output.parent.mkdir(parents=True, exist_ok=True)
+                            with archive.open(item) as src, output.open('wb') as dst:
+                                shutil.copyfileobj(src, dst)
+                    if any(not (stage / name).is_dir() for name in roots):
+                        raise ValueError(_('The backup contains no recognized save folders.'))
+                    self._replace_save_folders(stage, user, roots)
+            self.messagebox.showinfo(NAME, _('Saves restored.'))
+        except (OSError, ValueError, KeyError, json.JSONDecodeError, zipfile.BadZipFile) as error:
+            self.messagebox.showerror(NAME, _('Could not restore the backup: {}').format(error))
+
+
+    def _replace_save_folders(self, stage, user, roots):
+        # Keep originals on the same volume until every replacement succeeds.
+        recovery = Path(tempfile.mkdtemp(prefix='restore-recovery-', dir=user / 'backups'))
+        moved, installed, clean = [], [], False
+        try:
+            for name in roots:
+                destination = user / name
+                if not destination.resolve().is_relative_to(user):
+                    raise ValueError(_('The ZIP contains an invalid path.'))
+                if destination.exists():
+                    os.replace(destination, recovery / name)
+                    moved.append(name)
+                os.replace(stage / name, destination)
+                installed.append(name)
+            clean = True
+        except (OSError, ValueError) as error:
+            try:
+                for name in reversed(installed):
+                    destination = user / name
+                    if not destination.resolve().is_relative_to(user):
+                        raise OSError(str(destination))
+                    shutil.rmtree(destination)
+                for name in reversed(moved):
+                    os.replace(recovery / name, user / name)
+                clean = True
+            except OSError as rollback_error:
+                raise OSError(f'{rollback_error}; original data retained in {recovery}') from error
+            raise
+        finally:
+            if clean:
+                shutil.rmtree(recovery)
+
     def key_list(self, action):
         value = (self.app.get('key_bindings') or {}).get(action, DEFAULT_KEYS[action])
         parts = (value.split('|') + ['', ''])[:2]
@@ -1431,6 +1744,13 @@ class Launcher:
     def reset_pad(self):
         for action, var in self.pad_vars.items():
             var.set(DEFAULT_PAD[action])
+
+    def build_cheats(self):
+        f = self.page('cheats', _('Cheats'), _('Each cheat only affects its own game; changes apply when the game starts.'))
+        for game, title, subtitle, _exe in GAMES:
+            self.section(f, f'{title} · {subtitle}')
+            self.check(f, f'{game}_infinite_health', _('Infinite Health'))
+            self.check(f, f'{game}_infinite_ammo', _('Infinite Ammo'))
 
     def build_advanced(self):
         f = self.page('advanced', _('Advanced'), _('Maintenance and options for testing.'))
@@ -1605,7 +1925,7 @@ class Launcher:
         self.stop_button.configure(state='normal')
         self.status.configure(text=_('Preparing the game; it opens in its own window…'), fg=GOLD)
         if self.app.get('close_on_play'):
-            self.root.after(5000, self.root.destroy)
+            self.root.after(5000, self.close)
 
     def read_output(self, process):
         """Helper thread: the game's output to the Log page and to <saves folder>/last_run.log."""
