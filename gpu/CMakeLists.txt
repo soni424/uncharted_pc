@@ -279,6 +279,12 @@ if (WIN32)
 endif()
 
 # Explicit test targets; neither launches the game nor needs a Vulkan device.
+add_executable(record-chunk-test EXCLUDE_FROM_ALL ../tests/test_record_chunk.cpp
+    ../tests/test_gpu_runtime_stubs.cpp)
+target_include_directories(record-chunk-test PRIVATE shim shadps4 third_party/gcn/include)
+target_compile_options(record-chunk-test PRIVATE -UNDEBUG)
+target_link_libraries(record-chunk-test PRIVATE bbgpu)
+
 add_executable(motion-history-test EXCLUDE_FROM_ALL ../tests/test_motion_history.cpp)
 target_compile_options(motion-history-test PRIVATE -UNDEBUG -Wall -Wextra -Werror)
 target_include_directories(motion-history-test PRIVATE ..)

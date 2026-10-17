@@ -441,10 +441,10 @@ namespace {
 /// commonest) kept the GPU's bytes instead: U3's London pub reuses memory the GPU had filled
 /// with 0xff, and a free-list link the game set to 0 read back as ffffffffffffffff (its
 /// allocator faulted at 0xd9c59b), while the GPU read the same mixture and hung (device lost).
-/// The guest writes whole objects, so a change anywhere in an aligned 64-byte block (one cache
-/// line; GPU buffers are at least that aligned) makes the whole block the guest's.
+/// A change anywhere in an aligned 16-byte unit (the guest allocator's alignment) makes
+/// the whole unit inside the shadowed range the guest's.
 /// fn(begin, end, guest_owned) gets the runs of shadow.bytes, as offsets.
-constexpr u64 ShadowBlockBytes = 64;
+constexpr u64 ShadowBlockBytes = 16;
 std::atomic<u64> shadow_equal_bytes_claimed{0};
 std::atomic<u32> shadow_claim_reports{0};
 

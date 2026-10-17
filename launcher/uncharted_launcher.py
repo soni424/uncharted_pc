@@ -32,6 +32,7 @@ PORT_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).r
 sys.path.insert(0, str(PORT_DIR / 'scripts'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uncharted_i18n
+import pkg_game
 
 DATA_DIR = Path(os.environ.get('BB_DATA_DIR', PORT_DIR))
 CONFIG_DIR = Path(os.environ.get('APPDATA', Path.home())) / 'uncharted-launcher'
@@ -39,7 +40,7 @@ CONFIG_FILE = CONFIG_DIR / 'settings.json'
 NAME = 'Uncharted'
 AUTHOR = 'SuperMedo'
 # This build; GitHub release tags are v<VERSION> (their digits are compared).
-VERSION = '0.3.6'
+VERSION = '0.3.7'
 RELEASES_API = 'https://api.github.com/repos/Supermedo/uncharted_pc/releases/latest'
 RELEASES_PAGE = 'https://github.com/Supermedo/uncharted_pc/releases/latest'
 UPDATE_DIR = Path(tempfile.gettempdir()) / 'uncharted-update'
@@ -137,7 +138,10 @@ MOUSE_SENS_MIN, MOUSE_SENS_MAX = 0.1, 10.0  # the Controls page slider (the game
 RESERVED_KEYS = {'Insert': 'Insert opens the in-game settings menu.',
                  'Alt_L': 'Left Alt frees the mouse cursor while held.'}
 
-APP_DEFAULTS = {'game_dir': '', 'game_dir_u1': '', 'game_dir_u2': '', 'game_dir_u3': '',
+GAME_SOURCES = [('folder', 'Decrypted game folder'), ('pkg', 'PS4 PKG files')]
+PKG_FILE_TYPES = [('PS4 package', '*.pkg'), ('All files', '*.*')]
+
+APP_DEFAULTS = {'game_source': 'folder', 'base_pkg': '', 'update_pkg': '', 'game_dir': '', 'game_dir_u1': '', 'game_dir_u2': '', 'game_dir_u3': '',
                 'user_dir': '', 'start': 'u1', 'language': '1', 'ui_language': '', 'player_name': '',
                 'fullscreen': False, 'present_mode': 'Mailbox', 'frame_rate': '60', 'fps_limit': '0', 'show_fps': False,
                 'window_size': '1920x1080', 'scaler': 'fsr1', 'sharpening': '500',
@@ -203,6 +207,11 @@ def run_command():
     return [sys.executable, '--run'] if FROZEN else [sys.executable, str(PORT_DIR / 'run.py')]
 
 
+def script_command(name, *arguments):
+    script = ['--script'] if FROZEN else []
+    return [sys.executable, *script, str(PORT_DIR / 'scripts' / name), *map(str, arguments)]
+
+
 # ---------------------------------------------------------------------------------------------
 # Settings.
 
@@ -255,6 +264,8 @@ def game_info(folder):
 
 def game_folder(s, key):
     """Where one game is: its own folder (Game page, for a game dumped on its own), else the collection folder."""
+    if s.get('game_source') == 'pkg':
+        return active_game_dir(s)
     return str(s.get(f'game_dir_{key}') or '').strip() or str(s.get('game_dir') or '').strip()
 
 
@@ -264,7 +275,7 @@ def game_available(s, key):
     if not folder:
         return False
     exe = next(e for k, _t, _s, e in GAMES if k == key)
-    own = str(s.get(f'game_dir_{key}') or '').strip()
+    own = s.get('game_source') != 'pkg' and str(s.get(f'game_dir_{key}') or '').strip()
     return (Path(folder) / exe).is_file() or bool(own and (Path(folder) / 'eboot.bin').is_file())
 
 
@@ -282,6 +293,15 @@ def side_buttons():
         return tuple(bool(ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000) for vk in (5, 6))
     except (AttributeError, OSError):
         return (False, False)
+
+def active_game_dir(settings):
+    if settings.get('game_source') == 'pkg':
+        return str(pkg_game.view_dir(DATA_DIR))
+    return settings['game_dir']
+
+
+def package_paths(settings):
+    return str(settings['base_pkg']).strip(), str(settings['update_pkg']).strip() or None
 
 
 def display_refresh_rate():
@@ -340,10 +360,12 @@ def game_environment(s, start=None):
     start = start or s['start']
     # The collection folder; with none, the folder of the game started. A game with a folder of its own
     # (Game page) is taken from it, also when another game of the collection starts it.
-    env['BB_GAME_DIR'] = s['game_dir'] or game_folder(s, start)
+    env['BB_GAME_DIR'] = active_game_dir(s) or game_folder(s, start)
     for key, _t, _s, _e in GAMES:
-        if str(s.get(f'game_dir_{key}') or '').strip():
+        if s.get('game_source') != 'pkg' and str(s.get(f'game_dir_{key}') or '').strip():
             env[f'BB_GAME_DIR_{key.upper()}'] = game_folder(s, key)
+        elif s.get('game_source') == 'pkg':
+            env.pop(f'BB_GAME_DIR_{key.upper()}', None)
     env['BB_EXE'] = start
     if s['user_dir']:
         env['BB_USER_DIR'] = s['user_dir']
@@ -519,6 +541,10 @@ class Launcher:
         self.info, self.available = None, {}
         self.update_box = None
         self.update_info = None
+
+        self.prep = None
+        self.prep_output = queue.Queue()
+        self.prep_then_play, self.prep_error = False, ''
         root.title(f'{NAME} — The Nathan Drake Collection for Windows · by {AUTHOR}')
         root.configure(bg=BG)
         monitor_scale = root.winfo_fpixels('1i') / 96.0
@@ -732,15 +758,21 @@ class Launcher:
                           self.font_play if kind == 'primary' and icon else self.font_button, kind,
                           background, padding, icon, self.font_icon_sm)
 
-    def row(self, parent, title, widget, hint=None):
+    def row(self, parent, title, widget, hint=None, group=None):
         parent = self.target(parent)
         r = self.next_row(parent)
-        self.ttk.Label(parent, text=title).grid(row=r, column=0, sticky='nw', padx=(0, 24), pady=(9, 0))
+        label = self.ttk.Label(parent, text=title)
+        label.grid(row=r, column=0, sticky='nw', padx=(0, 24), pady=(9, 0))
         widget.grid(row=r, column=1, sticky='w', pady=(5, 0), in_=parent)
         widget.lift()
+        parts = [label, widget]
         if hint:
-            self.ttk.Label(parent, text=hint, style='Muted.TLabel', wraplength=self.px(560), justify='left').grid(
-                row=r + 1, column=1, sticky='w', pady=(3, 4))
+            hint_label = self.ttk.Label(parent, text=hint, style='Muted.TLabel', wraplength=self.px(560),
+                                        justify='left')
+            hint_label.grid(row=r + 1, column=1, sticky='w', pady=(3, 4))
+            parts.append(hint_label)
+        if group is not None:
+            group.extend(parts)
         return widget
 
     def check(self, parent, key, title, hint=None):
@@ -758,8 +790,9 @@ class Launcher:
 
     def note(self, parent, text, top=12):
         parent = self.target(parent)
-        self.ttk.Label(parent, text=text, style='Muted.TLabel', wraplength=self.px(680), justify='left').grid(
-            row=self.next_row(parent), column=0, columnspan=2, sticky='w', pady=(top, 0))
+        label = self.ttk.Label(parent, text=text, style='Muted.TLabel', wraplength=self.px(680), justify='left')
+        label.grid(row=self.next_row(parent), column=0, columnspan=2, sticky='w', pady=(top, 0))
+        return label
 
     def section(self, parent, title, top=18):
         if parent in self.page_cards:
@@ -768,21 +801,26 @@ class Launcher:
             row=self.next_row(parent), column=0, columnspan=2, sticky='w', pady=(top, 2))
         return parent
 
-    def folder(self, parent, key, title, prompt, hint=None, on_change=None):
+    def folder(self, parent, key, title, prompt, hint=None, on_change=None, group=None, file_types=None):
         var = self.var(key)
         holder = self.tk.Frame(self.target(parent), bg=CARD)
         self.ttk.Entry(holder, textvariable=var, width=54).pack(side='left')
 
         def browse():
-            chosen = self.filedialog.askdirectory(title=prompt, initialdir=var.get() or str(PORT_DIR))
+            if file_types:
+                start = str(Path(var.get()).parent) if var.get() else str(PORT_DIR)
+                chosen = self.filedialog.askopenfilename(title=prompt, initialdir=start, filetypes=file_types)
+            else:
+                chosen = self.filedialog.askdirectory(title=prompt, initialdir=var.get() or str(PORT_DIR))
             if chosen:
                 var.set(str(Path(chosen)))
         self.pill(holder, _('Browse…'), browse, padding=(14, 6)).pack(side='left', padx=(8, 0))
-        self.pill(holder, _('Open'), lambda: self.open_path(var.get(), key), kind='ghost',
-                  padding=(12, 6)).pack(side='left', padx=(4, 0))
+        if not file_types:
+            self.pill(holder, _('Open'), lambda: self.open_path(var.get(), key), kind='ghost',
+                      padding=(12, 6)).pack(side='left', padx=(4, 0))
         if on_change:
             var.trace_add('write', lambda *_a: on_change())
-        return self.row(parent, title, holder, hint)
+        return self.row(parent, title, holder, hint, group)
 
     def image_path(self, title, current=''):
         """Choose and validate a local image."""
@@ -1349,11 +1387,33 @@ class Launcher:
             return None
 
     def build_game(self):
-        f = self.page('game', _('Game'), _('Your own decrypted dump of the collection (CUSA02343, CUSA02320, …).'))
+        f = self.page('game', _('Game'), _('Your own copy: a decrypted game folder, or your PS4 packages.'))
+        self.folder_rows, self.pkg_rows = [], []
+        self.row(f, _('Game source'), self.choice(f, 'game_source', GAME_SOURCES, 30),
+                 _('A decrypted game folder you already have, or the original PS4 package files of CUSA02320.'))
         self.folder(f, 'game_dir', _('Game folder'), _('The folder with eboot.bin'),
                     _('The folder with eboot.bin, big2-ps4_Shipping.elf and big3-ps4_Shipping.elf. '
                       'Leave it empty if every game has a folder of its own, below.'),
-                    on_change=self.refresh)
+                    on_change=self.refresh, group=self.folder_rows)
+        self.folder(f, 'base_pkg', _('Base package'), _('The base package (CUSA02320 1.00)'),
+                    _('The game package, version 1.00 (.pkg).'), on_change=self.refresh, group=self.pkg_rows,
+                    file_types=PKG_FILE_TYPES)
+        self.folder(f, 'update_pkg', _('Update package'), _('The update package (CUSA02320 1.02)'),
+                    _('Optional: the 1.02 update (.pkg). Leave it empty to play the 1.00 game.'),
+                    on_change=self.refresh, group=self.pkg_rows, file_types=PKG_FILE_TYPES)
+        self.pkg_warning = self.note(f, '', top=12)
+        self.pkg_rows.append(self.pkg_warning)
+        card = self.target(f)
+        self.pkg_note = self.tk.Label(card, text='', bg=CARD, fg=MUTED, font=self.font_ui, wraplength=self.px(680),
+                                      justify='left')
+        self.pkg_note.grid(row=self.next_row(card), column=0, columnspan=2, sticky='w', pady=(12, 0))
+        self.pkg_rows.append(self.pkg_note)
+        holder = self.tk.Frame(card, bg=CARD)
+        self.prepare_button = self.pill(holder, _('Extract game'), self.prepare_now, padding=(14, 6))
+        self.prepare_button.pack(side='left')
+        self.row(f, _('Extracted game'), holder,
+                 _('Extracted to {}, reused on future launches.').format(pkg_game.view_dir(DATA_DIR)),
+                 self.pkg_rows)
         self.folder(f, 'user_dir', _('Saves folder'), _('Where saves and the shader cache are kept'),
                     _('Empty: the user folder next to the launcher.'))
         self.section(f, _('Separate game folders'))
@@ -1361,12 +1421,14 @@ class Launcher:
                        'a folder here is taken from it; the others from the collection folder above.'), top=2)
         for key, _title, subtitle, _exe in GAMES:
             self.folder(f, f'game_dir_{key}', _(subtitle.split(' · ')[0]), _('The folder of this game'),
-                        _('Empty: the collection folder.'), on_change=self.refresh)
+                        _('Empty: the collection folder.'), on_change=self.refresh, group=self.folder_rows)
         self.section(f, _('Console'))
         self.row(f, _('Language'), self.choice(f, 'language', LANGUAGES, 30),
                  _('The language the PS4 would be set to; the games use it for text and speech.'))
         name = self.ttk.Entry(f, textvariable=self.var('player_name'), width=30)
         self.row(f, _('Player name'), name, _('Shown where the game uses the PSN name.'))
+        self.show_source()
+        self.var('game_source').trace_add('write', lambda *_a: self.game_source_changed())
 
     def build_display(self):
         f = self.page('display', _('Display'), _('How the game window is shown.'))
@@ -1813,21 +1875,85 @@ class Launcher:
         # Nothing set yet: no cover is dimmed.
         unset = not any(game_folder(s, k) for k, _t, _s, _e in GAMES)
         self.available = {key: unset or game_available(s, key) for key, _t, _s, _e in GAMES}
+        packages = s.get('game_source') == 'pkg'
         for key in self.cards:
             self.draw_card(key)
         if not info:
-            ready = _('Choose the game folder (the one with eboot.bin) on the Game page.')
+            ready = (_('Choose your PS4 package files on the Game page.') if packages
+                     else _('Choose the game folder (the one with eboot.bin) on the Game page.'))
         else:
             missing = [title for key, title, _s, _e in GAMES if not self.available[key]]
             ready = f"{info['title']} · {info['id']} · {_('version')} {info['version']}"
             if missing:
                 ready += '\n' + _('Not in this folder: ') + ', '.join(missing)
         self.ready.configure(text=ready)
-        if not self.process:
+        if not self.process and not self.prep:
             title = next(t for k, t, _s, _e in GAMES if k == start)
-            self.status.configure(text=_('Ready: {}').format(title) if info else _('No game folder yet.'),
-                                  fg=MUTED)
+            if info and packages:
+                text = _('The extracted game is ready: {}.').format(title)
+            elif info:
+                text = _('Ready: {}').format(title)
+            elif packages:
+                text = _('The game has not been extracted yet. Press Play to extract it before the first launch.')
+            else:
+                text = _('No game folder yet.')
+            self.status.configure(text=text, fg=MUTED)
         self.draw_hero()
+        if packages:
+            self.refresh_packages()
+
+    def game_dir(self):
+        return active_game_dir({'game_source': self.var('game_source').get(), 'game_dir': self.var('game_dir').get()})
+
+    def show_source(self):
+        packages = self.var('game_source').get() == 'pkg'
+        for widget in self.folder_rows:
+            if packages:
+                widget.grid_remove()
+            else:
+                widget.grid()
+        for widget in self.pkg_rows:
+            if packages:
+                widget.grid()
+            else:
+                widget.grid_remove()
+
+    def game_source_changed(self):
+        self.show_source()
+        self.refresh()
+
+    def refresh_packages(self):
+        base, update = package_paths({'base_pkg': self.var('base_pkg').get(),
+                                      'update_pkg': self.var('update_pkg').get()})
+        generic = _('The selected PKG files will be extracted to a local game folder before the first launch. '
+                    'The extracted files are reused on future launches.')
+        if not base:
+            self.pkg_note.configure(text=_('Choose the base package (the 1.00 game) to play from PS4 package files.'),
+                                    fg=MUTED)
+            self.pkg_warning.configure(text=generic)
+            return
+        try:
+            selection = pkg_game.select_packages(base, update)
+        except pkg_game.PackageError as error:
+            self.pkg_note.configure(text=str(error), fg='#e07a4f')
+            self.pkg_warning.configure(text=generic)
+            return
+        name = f'{selection.title} {selection.version}'
+        reason = pkg_game.check_prepared(pkg_game.game_root(DATA_DIR), selection)
+        if reason is None:
+            self.pkg_note.configure(text=_('{}: the extracted game is ready.').format(name), fg=GOLD)
+            self.pkg_warning.configure(text=_('The extracted files are reused on future launches. They are extracted '
+                                              'again only if the packages change or the files are incomplete.'))
+            return
+        if reason == pkg_game.NOT_EXTRACTED:
+            text = _('{}: packages ready for extraction.').format(name)
+        else:
+            text = _('{}: packages ready for extraction; {}.').format(name, reason)
+        self.pkg_note.configure(text=text, fg=MUTED)
+        size = pkg_game.human(pkg_game.extracted_bytes(selection))
+        self.pkg_warning.configure(text=_('The selected PKG files will be extracted to a local game folder before the '
+                                          'first launch. It needs about {} of free disk space. The extracted files are '
+                                          'reused on future launches.').format(size))
 
     # ---- actions -----------------------------------------------------------------------------
     def change_ui_language(self):
@@ -1898,9 +2024,11 @@ class Launcher:
             pass
 
     def play(self):
-        if self.process:
+        if self.process or self.prep:
             return
         self.collect()
+        if self.app['game_source'] == 'pkg' and not self.ensure_prepared(then_play=True):
+            return
         folder = game_folder(self.app, self.app['start'])
         if not folder or not Path(folder).is_dir():
             self.messagebox.showerror(NAME, _('Choose the game folder with eboot.bin.'))
@@ -1927,6 +2055,91 @@ class Launcher:
         if self.app.get('close_on_play'):
             self.root.after(5000, self.close)
 
+    def prepare_now(self):
+        if self.process or self.prep:
+            return
+        self.collect()
+        if self.ensure_prepared(then_play=False):
+            self.status.configure(text=_('The game is already extracted.'), fg=MUTED)
+
+    def ensure_prepared(self, then_play):
+        """True when the prepared game matches the chosen packages; otherwise starts the preparation."""
+        try:
+            selection = pkg_game.select_packages(*package_paths(self.app))
+        except pkg_game.PackageError as error:
+            self.messagebox.showerror(NAME, str(error))
+            self.show('game')
+            return False
+        if pkg_game.check_prepared(pkg_game.game_root(DATA_DIR), selection) is None:
+            return True
+        self.start_prepare(then_play)
+        return False
+
+    def start_prepare(self, then_play):
+        base, update = package_paths(self.app)
+        arguments = ['prepare', '--base', base, '--root', str(pkg_game.game_root(DATA_DIR))]
+        if update:
+            arguments += ['--update', update]
+        env = {**os.environ, 'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8'}
+        try:
+            self.prep = subprocess.Popen(script_command('pkg_game.py', *arguments), cwd=PORT_DIR, env=env,
+                                         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                         stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
+        except OSError as error:
+            self.prep = None
+            self.messagebox.showerror(NAME, _('Could not start the extraction: {}').format(error))
+            return
+        self.prep_then_play, self.prep_error, self.stopping = then_play, '', False
+        self.set_log('')
+        threading.Thread(target=self.read_prepare_output, args=(self.prep,), daemon=True).start()
+        self.play_button.configure(state='disabled')
+        self.prepare_button.configure(state='disabled')
+        self.stop_button.configure(state='normal')
+        self.status.configure(text=_('Extracting the game from your PS4 packages…'), fg=GOLD)
+
+    def read_prepare_output(self, process):
+        for raw in iter(process.stdout.readline, b''):
+            self.prep_output.put(raw.decode('utf-8', errors='replace'))
+        self.prep_output.put((process.wait(),))
+
+    def drain_prepare(self):
+        try:
+            for _i in range(200):
+                item = self.prep_output.get_nowait()
+                if isinstance(item, tuple):
+                    self.prepare_done(item[0])
+                    break
+                text = item.strip()
+                if text.startswith('error: '):
+                    self.prep_error = text[len('error: '):]
+                elif text:
+                    self.status.configure(text=text[:120], fg=GOLD)
+                self.append(item)
+        except queue.Empty:
+            pass
+
+    def prepare_done(self, code):
+        self.prep = None
+        self.play_button.configure(state='normal')
+        self.prepare_button.configure(state='normal')
+        self.stop_button.configure(state='disabled')
+        self.append(_('\n— the extraction ended (code {}) —\n').format(code))
+        self.refresh()
+        if code == 0:
+            if self.prep_then_play and not self.stopping:
+                self.play()
+            elif not self.stopping:
+                self.status.configure(text=_('The game has been extracted. Press Play to start it.'), fg=GOLD)
+            else:
+                self.status.configure(text=_('Extraction stopped; it continues where it stopped.'), fg=MUTED)
+        elif self.stopping:
+            self.status.configure(text=_('Extraction stopped; it continues where it stopped.'), fg=MUTED)
+        else:
+            reason = self.prep_error or _('see the Log page')
+            self.status.configure(text=_('Extraction failed: {}').format(reason[:110]), fg='#e07a4f')
+            self.messagebox.showerror(NAME, reason)
+            self.show('game')
+
     def read_output(self, process):
         """Helper thread: the game's output to the Log page and to <saves folder>/last_run.log."""
         log = None
@@ -1948,6 +2161,7 @@ class Launcher:
     def drain_output(self):
         while not self.ui_calls.empty():
             self.ui_calls.get_nowait()()
+        self.drain_prepare()
         try:
             for _i in range(500):
                 item = self.output.get_nowait()
@@ -1984,7 +2198,10 @@ class Launcher:
         self.root.after(100, self.drain_output)
 
     def stop(self):
-        if self.job:
+        if self.prep:
+            self.stopping = True
+            self.prep.terminate()
+        elif self.job:
             self.stopping = True
             self.job.terminate()
 
@@ -2364,6 +2581,8 @@ class Launcher:
             self.collect()
         except Exception:  # never keep the window open over a settings problem
             pass
+        if self.prep:
+            self.prep.terminate()
         self.root.destroy()
 
 
