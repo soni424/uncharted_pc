@@ -38,6 +38,8 @@ namespace VideoCore {
 
 static constexpr size_t GDS_BUFFER_SIZE = 64_KB;
 static constexpr size_t STREAM_BUFFER_SIZE = 128_MB;
+// A sparse queue can be the readback queue too; serialize only their host submissions.
+static std::mutex sparse_side_submit_mutex;
 
 static constexpr auto ARENA_USAGE =
     vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst |
@@ -253,7 +255,7 @@ bool BufferCache::DownloadOnSideQueue(VAddr page, u64 length) {
         {
             // The sparse-binding queue can share this queue's handle. Vulkan requires
             // host submissions to the same queue to be externally synchronized.
-            std::scoped_lock submit_lock{Vulkan::Scheduler::submit_mutex};
+            std::scoped_lock submit_lock{sparse_side_submit_mutex};
             Vulkan::Check(side.queue.submit(submit, *side.fence));
         }
         Vulkan::Check(side.device.waitForFences(*side.fence, true, UINT64_MAX));
@@ -1368,7 +1370,11 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
         // Called inside Scheduler::SubmitExecution (queue lock held), so the queue is ours.
         (void)instance.GetGraphicsQueue().waitIdle();
     }
-    auto submit_result = instance.GetSparseQueue().bindSparse(sparse_info);
+    vk::Result submit_result;
+    {
+        std::scoped_lock submit_lock{sparse_side_submit_mutex};
+        submit_result = instance.GetSparseQueue().bindSparse(sparse_info);
+    }
     if (submit_result == vk::Result::eErrorDeviceLost) {
         std::printf("Device lost during a sparse bind\n");
         Vulkan::DeviceLost(instance.GetDevice());
