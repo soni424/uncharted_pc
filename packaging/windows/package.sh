@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds dist/uncharted-windows/ (and dist/uncharted-windows.zip): Uncharted.exe (the launcher,
+# Builds dist/uncharted-windows/ and a versioned ZIP: Uncharted.exe (the launcher,
 # frozen with PyInstaller so players need no Python), Play Uncharted.exe, bb-probe.exe with the
 # MSYS2 CLANG64 DLLs it needs, the preparation scripts and run.py. Run from an MSYS2 CLANG64
 # shell after `bash build.sh`. Freezing uses a Windows Python 3.10+ (python.org; WINPYTHON
@@ -85,10 +85,15 @@ for package in protobuf abseil-cpp openssl miniupnpc zlib; do
     if [[ -f $license ]]; then cp "$license" "$dest/licenses/$package-LICENSE.txt"; fi
 done
 find "$dest" -name __pycache__ -prune -exec rm -r {} +
+# Read the launcher constant without importing the GUI or maintaining another version number.
+version=$(out/pyenv/Scripts/python.exe -c \
+    'import ast, pathlib, re; tree = ast.parse(pathlib.Path("launcher/uncharted_launcher.py").read_text(encoding="utf-8")); version = next(ast.literal_eval(n.value) for n in tree.body if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "VERSION" for t in n.targets)); assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version), "Expected a numeric major.minor.patch version"; print(version)' | tr -d '\r')
+printf '%s\n' "$version" > "$dest/VERSION.txt"
+archive="dist/uncharted-windows-v$version.zip"
 mkdir -p dist
-rm -f dist/uncharted-windows.zip
+rm -f "$archive"
 (cd out/stage && powershell -NoProfile -Command \
-    "Compress-Archive -Path uncharted-windows -DestinationPath ../../dist/uncharted-windows.zip")
+    "Compress-Archive -Path uncharted-windows -DestinationPath ../../$archive")
 
 # Refresh dist/uncharted-windows, keeping what players create there (saves, settings), and only
 # while nothing runs from it: deleting a running launcher's files breaks it.
@@ -103,4 +108,4 @@ else
         ! -name input.ini ! -name last_run.log -exec rm -rf {} +
     cp -r "$dest/." "$play/"
 fi
-du -sh "$dest" dist/uncharted-windows.zip
+du -sh "$dest" "$archive"
