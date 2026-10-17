@@ -1430,6 +1430,7 @@ class Launcher:
         self.folder(f, 'user_dir', _('Saves folder'), _('Where saves and the shader cache are kept'),
                     _('Empty: the user folder next to the launcher.'))
         self.section(f, _('Separate game folders'))
+        self.folder_rows.append(self.page_cards[f].canvas)
         self.note(f, _('Only when the games are not in one collection folder (each dumped on its own). A game with '
                        'a folder here is taken from it; the others from the collection folder above.'), top=2)
         for key, _title, subtitle, _exe in GAMES:
