@@ -376,37 +376,11 @@ void Menu() {
          "stays at 1080p, which is noticeably slower on the Steam Deck and older GPUs. "
          "Off: everything is drawn at the preset's resolution, and changes need a restart. Auto turns "
          "it on for powerful discrete GPUs. Applies after restarting the game.");
-    ImGui::SeparatorText("Game effects (after restart)");
-    static const char* lods[] = {"Highest (-2)", "As in game", "Lower (1)", "Lowest (2)"};
-    static constexpr int lod_values[] = {-2, 0, 1, 2};
-    int lod_index = 1;
-    for (int i = 0; i < 4; ++i) {
-        if (lod_values[i] == s.model_lod) lod_index = i;
-    }
-    if (ImGui::BeginCombo("Model detail", lods[lod_index])) {
-        for (int i = 0; i < 4; ++i) {
-            if (ImGui::Selectable(lods[i], i == lod_index)) {
-                Store(s.model_lod, lod_values[i], true);
-            }
-        }
-        ImGui::EndCombo();
-    }
-    for (int e = 0; e < BbSettings::EffectCount; ++e) {
-        Checkbox(BbSettings::Effects[e].label, s.effects[e]);
-    }
-    Hint("Effects are switched by the game patches applied at startup. "
-         "Motion blur and dynamic light shadows add a noticeable load on the GPU.");
-    Hint("Free camera: hold Cross and press L3 (keyboard: Space + Z). "
-         "Debug menu: left touchpad / Tab. Needs DbgFont14h.ccm and DbgFont14h.tpf "
-         "in dvdroot_ps4/font. Right touchpad: Backspace.");
-
+    // No game-effect, cheat or model-detail toggles here: those were Bloodborne patches
+    // (scripts/patches.py, patches/Bloodborne.xml), which the Uncharted launch never applies.
     bool restart = s.object_motion != s.startup_object_motion ||
-                   s.model_lod != s.startup_model_lod ||
                    s.live_resolution != s.startup_live_resolution ||
                    BbSettings::ResolutionNeedsRestart();
-    for (int e = 0; e < BbSettings::EffectCount; ++e) {
-        restart |= s.effects[e] != s.startup_effects[e];
-    }
     if (restart) {
         ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
                            "Changes apply after restarting the game");

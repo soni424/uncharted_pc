@@ -250,7 +250,12 @@ bool BufferCache::DownloadOnSideQueue(VAddr page, u64 length) {
             .commandBufferCount = 1,
             .pCommandBuffers = &side.cmdbuf,
         };
-        Vulkan::Check(side.queue.submit(submit, *side.fence));
+        {
+            // The sparse-binding queue can share this queue's handle. Vulkan requires
+            // host submissions to the same queue to be externally synchronized.
+            std::scoped_lock submit_lock{Vulkan::Scheduler::submit_mutex};
+            Vulkan::Check(side.queue.submit(submit, *side.fence));
+        }
         Vulkan::Check(side.device.waitForFences(*side.fence, true, UINT64_MAX));
         Vulkan::Check(side.device.resetFences(*side.fence));
         side.staging.Invalidate(0, total);
@@ -1363,7 +1368,7 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
         // Called inside Scheduler::SubmitExecution (queue lock held), so the queue is ours.
         (void)instance.GetGraphicsQueue().waitIdle();
     }
-    auto submit_result = instance.GetGraphicsQueue().bindSparse(sparse_info);
+    auto submit_result = instance.GetSparseQueue().bindSparse(sparse_info);
     if (submit_result == vk::Result::eErrorDeviceLost) {
         std::printf("Device lost during a sparse bind\n");
         Vulkan::DeviceLost(instance.GetDevice());
