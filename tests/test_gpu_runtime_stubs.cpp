@@ -3,7 +3,12 @@
 #include <chrono>
 #include <cstdint>
 #include <cstddef>
+#ifdef _WIN32
+#include "../src/compat_win.h"
+using sigjmp_buf = bb_jmp_buf;
+#else
 #include <setjmp.h>
+#endif
 // Renderer tests have no guest process. Clock/host-thread services work; guest accesses abort.
 extern "C" {
 thread_local sigjmp_buf* runtime_fault_recover = nullptr;

@@ -54,6 +54,7 @@ class LauncherTranslationTests(unittest.TestCase):
 
     def test_display_choice_options_are_translated(self):
         option_sets = (
+            uncharted_launcher.GAME_SOURCES,
             uncharted_launcher.PRESENT_MODES,
             uncharted_launcher.FRAME_RATES,
             uncharted_launcher.WINDOW_SIZES,

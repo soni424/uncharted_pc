@@ -304,6 +304,19 @@ def package_paths(settings):
     return str(settings['base_pkg']).strip(), str(settings['update_pkg']).strip() or None
 
 
+def game_ready(settings):
+    """A shortcut can launch directly only when the selected source is ready."""
+    if not game_available(settings, settings['start']):
+        return False
+    if settings.get('game_source') != 'pkg':
+        return True
+    try:
+        selection = pkg_game.select_packages(*package_paths(settings))
+    except pkg_game.PackageError:
+        return False
+    return pkg_game.check_prepared(pkg_game.game_root(DATA_DIR), selection) is None
+
+
 def display_refresh_rate():
     """Refresh rate of the main display in Hz, or None."""
     try:
@@ -1873,7 +1886,8 @@ class Launcher:
         self.info = game_info(game_folder(s, start))
         info = self.info
         # Nothing set yet: no cover is dimmed.
-        unset = not any(game_folder(s, k) for k, _t, _s, _e in GAMES)
+        unset = (s.get('game_source') == 'pkg' and not info) or not any(
+            game_folder(s, k) for k, _t, _s, _e in GAMES)
         self.available = {key: unset or game_available(s, key) for key, _t, _s, _e in GAMES}
         packages = s.get('game_source') == 'pkg'
         for key in self.cards:
@@ -2678,7 +2692,7 @@ def main():
     if FROZEN and UPDATE_DIR not in PORT_DIR.parents:
         shutil.rmtree(UPDATE_DIR, ignore_errors=True)  # what a finished update left behind
     settings = {**APP_DEFAULTS, **load_json(CONFIG_FILE, {})}
-    if '--play' in args and game_available(settings, settings['start']):
+    if '--play' in args and game_ready(settings):
         sys.exit(play_without_window(settings))
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)

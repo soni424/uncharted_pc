@@ -311,6 +311,40 @@ class LauncherSettingsTests(unittest.TestCase):
         self.assertEqual(uncharted_launcher.package_paths({"base_pkg": " a.pkg ", "update_pkg": "  "}), ("a.pkg", None))
 
 
+class PackageSourceIntegrationTests(unittest.TestCase):
+    def test_pkg_source_ignores_stored_separate_folders_and_environment(self):
+        settings = {**uncharted_launcher.APP_DEFAULTS, 'game_source': 'pkg',
+                    'game_dir': 'old-collection', 'game_dir_u2': 'old-u2',
+                    'u2_infinite_ammo': True}
+        with mock.patch.object(uncharted_launcher, 'write_input_ini', return_value=Path('input.ini')), \
+                mock.patch.dict(os.environ, {'BB_GAME_DIR_U2': 'old-env-u2'}):
+            env = uncharted_launcher.game_environment(settings, 'u2')
+        self.assertEqual(env['BB_GAME_DIR'], str(g.view_dir(uncharted_launcher.DATA_DIR)))
+        self.assertNotIn('BB_GAME_DIR_U2', env)
+        self.assertEqual(env['BB_EXE'], 'u2')
+        self.assertIn('u2:ammo', env['BB_CHEATS'])
+        self.assertEqual(settings['game_dir_u2'], 'old-u2')
+
+    def test_separate_eboot_fallback_does_not_leak_into_pkg_source(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            (folder / 'eboot.bin').write_bytes(b'fixture')
+            settings = {**uncharted_launcher.APP_DEFAULTS, 'game_dir_u2': str(folder)}
+            self.assertTrue(uncharted_launcher.game_available(settings, 'u2'))
+            settings['game_source'] = 'pkg'
+            with mock.patch.object(uncharted_launcher.pkg_game, 'view_dir', return_value=folder):
+                self.assertFalse(uncharted_launcher.game_available(settings, 'u2'))
+
+    def test_shortcut_checks_selected_packages_even_if_old_view_exists(self):
+        settings = {**uncharted_launcher.APP_DEFAULTS, 'game_source': 'pkg', 'base_pkg': 'new.pkg'}
+        with mock.patch.object(uncharted_launcher, 'game_available', return_value=True), \
+                mock.patch.object(g, 'select_packages', return_value=object()), \
+                mock.patch.object(g, 'check_prepared', return_value='the packages changed') as check:
+            self.assertFalse(uncharted_launcher.game_ready(settings))
+            check.return_value = None
+            self.assertTrue(uncharted_launcher.game_ready(settings))
+
+
 REAL_BASE = os.environ.get("UNCHARTED_BASE_PKG", "")
 REAL_UPDATE = os.environ.get("UNCHARTED_UPDATE_PKG", "")
 

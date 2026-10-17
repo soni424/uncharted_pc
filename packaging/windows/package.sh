@@ -67,6 +67,11 @@ cp packaging/windows/licenses/*.txt "$dest/licenses/" 2>/dev/null || true
 for license in out/pyenv/Lib/site-packages/tkinterdnd2-*.dist-info/licenses/LICENSE; do
     [[ -f $license ]] && cp "$license" "$dest/licenses/tkinterdnd2-LICENSE.txt"
 done
+for package in cryptography cffi; do
+    for license in out/pyenv/Lib/site-packages/$package-*.dist-info/licenses/*; do
+        [[ -f $license ]] && cp "$license" "$dest/licenses/$package-$(basename "$license").txt"
+    done
+done
 # FSR 4 (the v07 INT8 model) when its assets are in fsr4_shaders/ (tools/fetch_fsr4_assets.sh).
 if [[ -d fsr4_shaders ]]; then cp -r fsr4_shaders "$dest/"; fi
 # DLSS and DLSS Frame Generation (NVIDIA RTX): the MSVC-built bridge and NVIDIA's runtimes, next
