@@ -11,6 +11,7 @@
 #include <cstring>
 #include <cwchar>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>

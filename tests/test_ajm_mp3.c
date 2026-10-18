@@ -12,6 +12,13 @@ uintptr_t runtime_lookup(const RuntimeExport *table, size_t count, const char *n
 
 int main(int argc, char **argv) {
     assert(argc == 3);
+    // Header-like tag/padding bytes for Layer I/II must never reach the MP3 decoder.
+    for (unsigned layer = 0; layer < 4; ++layer) {
+        unsigned char header[] = {0xff, (unsigned char)(0xf9 | (layer << 1)), 0x90, 0x00};
+        Mp3Frame frame = {0};
+        int32_t result = mp3_parse_frame(header, sizeof(header), 0, &frame);
+        assert(layer == 1 ? result == 0 : result == ERR_INVALID_PARAMETER);
+    }
     FILE *input = fopen(argv[1], "rb");
     assert(input && fseek(input, 0, SEEK_END) == 0);
     long length = ftell(input);

@@ -1,6 +1,6 @@
 # Uncharted: The Nathan Drake Collection for Windows
 
-This fork uses **upstream version + fork revision**: `0.3.3.8` is upstream `0.3.3` with fork revision `8`. Further fork updates increment the last number. When a newer upstream release is integrated, the prefix follows it and the revision starts at `1` (for example `0.3.4.1` or `0.4.0.1`). Built-in updates come from this fork.
+This fork uses **upstream version + fork revision**: `0.3.6.1` is upstream `0.3.6` with fork revision `1`. Further fork updates increment the last number. When a newer upstream release is integrated, the prefix follows it and the revision starts at `1` (for example `0.3.4.1` or `0.4.0.1`). Built-in updates come from this fork.
 
 **Uncharted 1, 2 and 3 from the PS4 collection running natively on Windows 10 and 11, by [SuperMedo](https://github.com/Supermedo).** Mohammed Albarghouthi
 
@@ -27,6 +27,7 @@ code runs directly on your PC and the graphics are translated to Vulkan. Unpack 
 ## Requirements
 
 - Windows 10 (1903 or later) or Windows 11, 64-bit.
+- An Intel Core 4th generation (Haswell) or newer, an AMD Ryzen, or an AMD FX.
 - A graphics card with Vulkan 1.3 and a current driver, with **6 GB of video memory or more**.
   4 GB cards (GTX 1650, RX 570) run out of video memory and crash after a while; on those, keep
   Anti-aliasing and Frame generation off.
@@ -43,12 +44,19 @@ code runs directly on your PC and the graphics are translated to Vulkan. Unpack 
 - **Crash with "ASSERTION: GetRenderFrameParams(frameToFreeInstancesFor)->m_gfxEopTick"**
   (mostly U1 after the first cutscene): the game expected the GPU side to be done with a frame it
   wanted to reuse, and stopped when it wasn't yet (shaders building on a first run). Fixed in
-  0.3.2: the game now waits for it. If you still see it, open an issue with your log.
+  0.3.2 (0.3.4 for the 1.02 versions): the game now waits for it. If you still see it, open an
+  issue with your log.
 - **Intel HD / UHD graphics:** a black screen on the HD 630 is fixed in 0.3.3. Older Intel chips
   (HD 520) can still crash inside Intel's own driver.
-- **Uncharted 2 streaming crash** (`iSubMesh < m_numSubMeshInstances`, white textures first) and the
-  **Uncharted 3 London bar crash** (fault at `0xd9c59b`): both seen on the US version 1.02
-  (CUSA02320). Being looked at.
+- **Uncharted 3 London bar crash** (fault at `0xd9c59b`, or device lost in the bar fight): fixed in
+  0.3.4.
+- **Uncharted 2 loading crashes** (`ReadSync file (req/read: ...)`, white textures then
+  `iSubMesh < m_numSubMeshInstances`): file reads could come back cut short. Fixed in 0.3.5.
+- **Older CPUs:** the games use instructions of the PS4's processor (AVX, BMI1, MOVBE, LZCNT).
+  AMD FX runs since 0.3.6 (its missing MOVBE is emulated, a bit slower). Intel Core 3rd generation
+  and older can't run the games yet; the game says so instead of crashing with 0xc000001d.
+- **Uncharted 2, train wreck:** `IsFinite(deltaTransform)` in character-leg-ik.cpp, fixed in 0.3.6
+  for the EU 1.00 version.
 - Frame rates above 120 are experimental.
 
 ## Building
