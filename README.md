@@ -1,6 +1,6 @@
 # Uncharted: The Nathan Drake Collection for Windows
 
-This fork uses **upstream version + fork revision**: `0.3.6.1` is upstream `0.3.6` with fork revision `1`. Further fork updates increment the last number. When a newer upstream release is integrated, the prefix follows it and the revision starts at `1` (for example `0.3.4.1` or `0.4.0.1`). Built-in updates come from this fork.
+This fork uses **upstream version + fork revision**: `0.3.6.1` is upstream `0.3.6` with fork revision `1`. Further fork updates increment the last number. When a newer upstream release is integrated, the prefix follows it and the revision starts at `1` (for example `0.3.7.1` or `0.4.0.1`). Built-in updates come from this fork.
 
 **Uncharted 1, 2 and 3 from the PS4 collection running natively on Windows 10 and 11, by [SuperMedo](https://github.com/Supermedo).** Mohammed Albarghouthi
 
