@@ -18,6 +18,7 @@ spec.loader.exec_module(launcher)
 def window(process=None, job=None):
     instance = launcher.Launcher.__new__(launcher.Launcher)
     instance.process = process
+    instance.prep = None
     instance.job = job
     instance.stopping = False
     instance.stop_button = mock.Mock()
@@ -181,6 +182,14 @@ class StopActionTests(unittest.TestCase):
         launcher_window = window()
         launcher_window.stop()
         launcher_window.stop_button.configure.assert_not_called()
+
+    def test_running_preparation_is_cancelled(self):
+        launcher_window = window(job=mock.Mock())
+        launcher_window.prep = mock.Mock()
+        launcher_window.stop()
+        launcher_window.prep.terminate.assert_called_once_with()
+        launcher_window.job.terminate.assert_not_called()
+        self.assertTrue(launcher_window.stopping)
 
 
 class ProcessTreeFallbackTests(unittest.TestCase):

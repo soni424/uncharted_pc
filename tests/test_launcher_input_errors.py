@@ -42,6 +42,7 @@ class InputConfigurationFailureTests(unittest.TestCase):
             app = settings(game)
             window = launcher.Launcher.__new__(launcher.Launcher)
             window.process = None
+            window.prep = None
             window.app = app
             window.collect = mock.Mock()
             window.set_log = mock.Mock()

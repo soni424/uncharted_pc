@@ -1441,3 +1441,45 @@ _PKG_TRANSLATIONS = [('Game source',
 for _key, *_texts in _PKG_TRANSLATIONS:
     for _code, _text in zip(('es', 'pt', 'fr', 'de', 'it', 'ja'), _texts, strict=True):
         EXTRA_TRANSLATIONS.setdefault(_code, {})[_key] = _text
+
+# Launcher error reports from upstream #333, #337 and #357.
+_REPORT_TRANSLATIONS = [
+ ('Could not clear the shader cache: {}',
+  'No se pudo vaciar la caché de shaders: {}',
+  'Não foi possível limpar o cache de shaders: {}',
+  'Impossible de vider le cache des shaders : {}',
+  'Der Shader-Cache konnte nicht geleert werden: {}',
+  'Impossibile svuotare la cache degli shader: {}',
+  'シェーダーキャッシュを消去できませんでした：{}'),
+ ('Could not save the input configuration: {}',
+  'No se pudo guardar la configuración de controles: {}',
+  'Não foi possível salvar a configuração dos controles: {}',
+  'Impossible d’enregistrer la configuration des commandes : {}',
+  'Die Steuerungskonfiguration konnte nicht gespeichert werden: {}',
+  'Impossibile salvare la configurazione dei comandi: {}',
+  '操作設定を保存できませんでした：{}'),
+ ('Could not stop the game: {}',
+  'No se pudo detener el juego: {}',
+  'Não foi possível parar o jogo: {}',
+  'Impossible d’arrêter le jeu : {}',
+  'Das Spiel konnte nicht beendet werden: {}',
+  'Impossibile arrestare il gioco: {}',
+  'ゲームを停止できませんでした：{}'),
+ ('Stopping the game…',
+  'Deteniendo el juego…',
+  'Parando o jogo…',
+  'Arrêt du jeu…',
+  'Das Spiel wird beendet…',
+  'Arresto del gioco…',
+  'ゲームを停止しています…'),
+ ('taskkill exited with code {}',
+  'taskkill terminó con el código {}',
+  'taskkill terminou com o código {}',
+  'taskkill s’est terminé avec le code {}',
+  'taskkill wurde mit Code {} beendet',
+  'taskkill è terminato con il codice {}',
+  'taskkill がコード {} で終了しました')]
+
+for _key, *_texts in _REPORT_TRANSLATIONS:
+    for _code, _text in zip(('es', 'pt', 'fr', 'de', 'it', 'ja'), _texts, strict=True):
+        EXTRA_TRANSLATIONS.setdefault(_code, {})[_key] = _text
