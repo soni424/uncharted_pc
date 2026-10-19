@@ -40,7 +40,7 @@ CONFIG_FILE = CONFIG_DIR / 'settings.json'
 NAME = 'Uncharted'
 AUTHOR = 'SuperMedo'
 # Upstream release plus this fork's revision; GitHub tags are v<VERSION>.
-VERSION = '0.3.6.1'
+VERSION = '0.3.6.2'
 RELEASES_API = 'https://api.github.com/repos/soni424/uncharted_pc/releases/latest'
 RELEASES_PAGE = 'https://github.com/soni424/uncharted_pc/releases/latest'
 UPDATE_DIR = Path(tempfile.gettempdir()) / 'uncharted-update'
