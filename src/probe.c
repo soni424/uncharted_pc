@@ -768,8 +768,7 @@ static void install_game_callbacks(Segment *segments, uint64_t ns, uint64_t imag
             continue;
         }
         if (!thunks && !thunk_failed && !(thunks=near_image_memory(8192))) {
-            printf("Callbacks: no thunk memory
-");
+            printf("Callbacks: no thunk memory\n");
             thunk_failed=1; /* the plain patches below still apply */
         }
         if (!thunks) continue;
