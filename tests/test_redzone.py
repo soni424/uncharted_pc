@@ -114,14 +114,22 @@ class SiteTables(unittest.TestCase):
         for store in (0x63df24, 0x63e0cd, 0x63e0e0, 0x63e0e9, 0x63e0fe, 0x63e15a, 0x63e1b3, 0x63e1b8):
             self.assertIn(store, self.stores(u1), hex(store))
 
-    def test_sites_do_not_overlap_runtime_guest_patches(self):
+    def test_runtime_guest_patterns_survive_the_rewritten_stores(self):
+        # runtime_pad.c finds its hooks by byte pattern (#348). A pattern that spells out a
+        # rewritten store's original bytes stops matching once link_modules.py has replaced
+        # the store with a jump, and the hook is silently not installed ("CUE table fill" did).
         source = (ROOT / 'src' / 'runtime_pad.c').read_text(encoding='utf-8')
-        patched = [int(m, 16) for m in re.findall(r'\{"[^"]+",(0x[0-9a-f]+),', source)]
-        self.assertTrue(patched)
-        for table in self.tables:
-            for offset, original, _ in table['sites']:
-                end = offset + len(original) // 2
-                self.assertFalse(any(offset - 64 < p < end for p in patched), (table['executable'], hex(offset)))
+        entries = re.findall(r'\{"([^"]+)",\s*((?:"[0-9a-f? ]+"\s*)+),', source)
+        self.assertTrue(entries)
+        stores = {original for table in self.tables for _, original, _ in table['sites']
+                  if len(original) >= 10}
+        for name, pieces in entries:
+            pattern = ''.join(re.findall(r'"([^"]*)"', pieces)).replace(' ', '')
+            runs = [run for run in re.split(r'(?:\?\?)+', pattern) if run]
+            for run in runs:
+                for original in stores:
+                    if original in run and (run.index(original) % 2 == 0):
+                        self.fail(f'{name}: pattern spells out the rewritten store {original}')
 
 
 @unittest.skipUnless(os.name == 'nt', 'Windows exception dispatch')
