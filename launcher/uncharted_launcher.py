@@ -33,6 +33,7 @@ sys.path.insert(0, str(PORT_DIR / 'scripts'))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uncharted_i18n
 import pkg_game
+import trophies  # noqa: E402  (scripts/trophies.py: the games' trophy lists)
 
 DATA_DIR = Path(os.environ.get('BB_DATA_DIR', PORT_DIR))
 CONFIG_DIR = Path(os.environ.get('APPDATA', Path.home())) / 'uncharted-launcher'
@@ -158,7 +159,7 @@ APP_DEFAULTS = {'game_source': 'folder', 'base_pkg': '', 'update_pkg': '', 'game
                 'check_updates': True,
                 'art_banner': '', 'art_u1': '', 'art_u2': '', 'art_u3': '', 'steam_art': '',
                 'art_crops': {}, 'shortcut_name': 'Uncharted: The Nathan Drake Collection',
-                'shortcut_icon': '', 'window_maximized': False,
+                'shortcut_icon': '', 'window_maximized': False, 'trophy_game': 'u1',
                 **{f'{game}_infinite_{cheat}': False for game, _t, _s, _e in GAMES for cheat in ('health', 'ammo')}}
 
 
@@ -446,7 +447,9 @@ COLORS = {'surface': SURFACE, 'card': CARD, 'card_hi': CARD_HI, 'line': LINE, 't
           'button': '#25272b', 'button_hi': '#30333a'}
 # Sidebar icons (Segoe Fluent Icons on Windows 11, Segoe MDL2 Assets on Windows 10).
 NAV_ICONS = {'play': '\ue768', 'game': '\ue7fc', 'display': '\ue7f4', 'controls': '\ue765',
-             'cheats': '\ue734', 'saves': '\ue74e', 'advanced': '\ue713', 'log': '\ue8a5'}
+             'cheats': '\ue734', 'trophies': '\ue735', 'saves': '\ue74e', 'advanced': '\ue713', 'log': '\ue8a5'}
+# Trophy grades as the console colours them (the platinum cool white-blue, the rest metal).
+TROPHY_COLORS = {'P': '#9fd0f5', 'G': GOLD, 'S': '#cfd3da', 'B': '#cf8548'}
 RUST, RUST_HI = GOLD, GOLD_HI
 DWM_USE_IMMERSIVE_DARK_MODE = 20
 DWM_USE_IMMERSIVE_DARK_MODE_LEGACY = 19
@@ -1072,7 +1075,8 @@ class Launcher:
         tk.Frame(side, bg=LINE, height=1).pack(fill='x', padx=18, pady=(16, 14))
         self.nav, self.nav_pills, self.nav_icons, self.nav_marks, self.current_page = {}, {}, {}, {}, None
         for name, title in (('play', _('Play')), ('game', _('Game')), ('cheats', _('Cheats')),
-                            ('display', _('Display')), ('controls', _('Controls')), ('saves', _('Saves')), ('advanced', _('Advanced')),
+                            ('display', _('Display')), ('controls', _('Controls')), ('trophies', _('Trophies')),
+                            ('saves', _('Saves')), ('advanced', _('Advanced')),
                             ('log', _('Log'))):
             row = tk.Frame(side, bg=BG, cursor='hand2')
             row.pack(fill='x', padx=(0, 12), pady=2)
@@ -1133,6 +1137,7 @@ class Launcher:
         self.build_controls()
         self.build_cheats()
         self.build_saves()
+        self.build_trophies()
         self.build_advanced()
         self.build_log()
         self.refresh()
@@ -1185,6 +1190,10 @@ class Launcher:
             self._nav_style(n, active=(n == name))
         if name == 'play':
             self.refresh()
+        elif name == 'trophies':
+            self.trophy_info.clear()  # the game folder or the language may have changed
+            self.trophy_state = None
+            self.render_trophies()
 
     def size_page(self, name):
         """Sizes a page to the content area; True when the size changed."""
@@ -1857,6 +1866,166 @@ class Launcher:
             self.section(f, f'{title} · {subtitle}')
             self.check(f, f'{game}_infinite_health', _('Infinite Health'))
             self.check(f, f'{game}_infinite_ammo', _('Infinite Ammo'))
+
+    # ---- trophies ----------------------------------------------------------------------------
+    def build_trophies(self):
+        tk = self.tk
+        f = self.page('trophies', _('Trophies'),
+                      _("The games' own trophy lists. A trophy shows here, and as a notice in the game, "
+                        'when you earn it.'))
+        self.trophy_game = self.app.get('trophy_game') if self.app.get('trophy_game') in dict(
+            (k, 1) for k, _t, _s, _e in GAMES) else GAMES[0][0]
+        self.trophy_filter = 'all'
+        self.trophy_icons, self.trophy_state, self.trophy_info = {}, None, {}
+        bar = tk.Frame(f, bg=SURFACE)
+        bar.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(0, self.px(10)))
+        self.trophy_tabs = {}
+        for key, title, _sub, _exe in GAMES:
+            button = self.pill(bar, title, lambda k=key: self.set_trophy_game(k), background=SURFACE,
+                               padding=(16, 7))
+            button.pack(side='left', padx=(0, 8))
+            self.trophy_tabs[key] = button
+        self.trophy_filters = {}
+        for name, title in (('locked', _('Locked')), ('earned', _('Earned')), ('all', _('All'))):
+            button = self.pill(bar, title, lambda n=name: self.set_trophy_filter(n), background=SURFACE,
+                               padding=(14, 7))
+            button.pack(side='right', padx=(8, 0))
+            self.trophy_filters[name] = button
+        self.trophy_summary = tk.Label(f, text='', bg=SURFACE, fg=MUTED, font=self.font_ui, anchor='w',
+                                       justify='left')
+        self.trophy_summary.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(0, self.px(10)))
+        self.trophy_body = tk.Frame(f, bg=SURFACE)
+        self.trophy_body.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we')
+        self.root.after(1500, self.poll_trophies)
+
+    def trophy_user_dir(self):
+        return Path(self.var('user_dir').get().strip() or DATA_DIR / 'user')
+
+    def trophy_info_for(self, key):
+        """The trophy list of one game (texts in the console language), made from its trophy pack in
+        the game folder when it is not there yet; None without a pack."""
+        s = self.current()
+        folder = game_folder(s, key)
+        if not folder:
+            return None
+        stem = next(exe for k, _t, _s, exe in GAMES if k == key)
+        out = DATA_DIR / 'out' / Path(stem).stem.split('-')[0] / 'trophy'
+        own = bool(str(s.get(f'game_dir_{key}') or '').strip())
+        language = str(s.get('language') or '1')
+        try:
+            trophies.prepare(folder, key, out, int(language) if language.isdigit() else 1, own)
+        except Exception:  # a broken pack must not break the launcher
+            return None
+        info = trophies.read_cache(out)
+        if info:
+            info['folder'] = out
+        return info
+
+    def trophy_icon(self, info, number, size, earned):
+        """The trophy's icon from the cache folder (dimmed while it is locked)."""
+        name = (info['npcommid'], number, size, earned)
+        if name not in self.trophy_icons:
+            image = None
+            try:
+                from PIL import Image, ImageEnhance, ImageTk
+                with Image.open(info['folder'] / f'TROP{number:03d}.PNG') as source:
+                    icon = source.convert('RGBA').resize((size, size), Image.LANCZOS)
+                if not earned:
+                    icon = ImageEnhance.Brightness(ImageEnhance.Color(icon).enhance(0.15)).enhance(0.55)
+                image = ImageTk.PhotoImage(icon)
+            except (ImportError, OSError):
+                pass
+            self.trophy_icons[name] = image
+        return self.trophy_icons[name]
+
+    @staticmethod
+    def mark_pill(button, on):
+        kind = 'primary' if on else 'secondary'
+        if button.kind != kind:
+            button.kind = kind
+            button.draw()
+
+    def set_trophy_game(self, key):
+        self.trophy_game, self.trophy_state = key, None
+        self.app['trophy_game'] = key
+        self.render_trophies()
+
+    def set_trophy_filter(self, name):
+        self.trophy_filter, self.trophy_state = name, None
+        self.render_trophies()
+
+    def render_trophies(self, force=False):
+        """Redraws the list of the chosen game when what it shows changed."""
+        key = self.trophy_game
+        info = self.trophy_info.get(key)
+        if info is None or force:
+            info = self.trophy_info[key] = self.trophy_info_for(key) or False
+        unlocked = trophies.read_unlocks(self.trophy_user_dir(), info['npcommid']) if info else {}
+        state = (key, self.trophy_filter, tuple(sorted(unlocked.items())), bool(info))
+        for k, button in self.trophy_tabs.items():
+            self.mark_pill(button, k == key)
+        for name, button in self.trophy_filters.items():
+            self.mark_pill(button, name == self.trophy_filter)
+        if state == self.trophy_state:
+            return
+        self.trophy_state = state
+        tk = self.tk
+        for child in self.trophy_body.winfo_children():
+            child.destroy()
+        if not info:
+            self.trophy_summary.configure(text='')
+            self.note_in(self.trophy_body, _('No trophy list for this game. Set the game folder on the Game page '
+                                             '(it needs sce_sys/trophy/trophy0N.trp).'))
+            return
+        progress = trophies.progress(info, unlocked)
+        grades = '   '.join(f"{_(trophies.GRADE_NAMES[g])} {progress['earned'][g]}/{progress['total'][g]}"
+                            for g in 'PGSB' if progress['total'][g])
+        self.trophy_summary.configure(
+            text=f"{info['title']}\n{progress['count']} of {len(info['trophies'])} earned · {progress['percent']}%"
+                 f'   ·   {grades}')
+        shown = 0
+        size = self.px(52)
+        for number, grade, hidden, name, detail in info['trophies']:
+            when = unlocked.get(number)
+            if (self.trophy_filter == 'earned') != (when is not None) and self.trophy_filter != 'all':
+                continue
+            shown += 1
+            if hidden and when is None:
+                name, detail = _('Hidden trophy'), _('Keep playing to find out how to earn it.')
+            card = tk.Frame(self.trophy_body, bg=CARD, highlightthickness=1, highlightbackground=LINE)
+            card.pack(fill='x', pady=(0, 6))
+            icon = self.trophy_icon(info, number, size, when is not None)
+            if icon:
+                tk.Label(card, image=icon, bg=CARD).pack(side='left', padx=(10, 12), pady=8)
+            side = tk.Frame(card, bg=CARD)
+            side.pack(side='right', padx=(10, 16))
+            color = TROPHY_COLORS.get(grade, MUTED) if when is not None else MUTED
+            tk.Label(side, text=_(trophies.GRADE_NAMES.get(grade, 'Bronze')), bg=CARD, fg=color,
+                     font=('Segoe UI Semibold', 9)).pack(anchor='e')
+            tk.Label(side, text=time.strftime('%d %b %Y', time.localtime(when)) if when is not None else _('Locked'),
+                     bg=CARD, fg=MUTED, font=self.font_ui_sm).pack(anchor='e', pady=(2, 0))
+            middle = tk.Frame(card, bg=CARD)
+            middle.pack(side='left', fill='x', expand=True, pady=8)
+            tk.Label(middle, text=name, bg=CARD, fg=TEXT if when is not None else MUTED, anchor='w',
+                     font=self.font_ui_md).pack(anchor='w')
+            tk.Label(middle, text=detail, bg=CARD, fg=MUTED, font=self.font_ui_sm, justify='left', anchor='w',
+                     wraplength=self.px(520)).pack(anchor='w', pady=(1, 0))
+        if not shown:
+            self.note_in(self.trophy_body, _('Nothing here yet.') if self.trophy_filter == 'earned'
+                         else _('Every trophy is earned.'))
+
+    def note_in(self, parent, text):
+        self.tk.Label(parent, text=text, bg=SURFACE, fg=MUTED, font=self.font_ui, anchor='w', justify='left',
+                      wraplength=self.px(640)).pack(anchor='w', pady=(8, 0))
+
+    def poll_trophies(self):
+        """Every 1.5 s while the page is open: the game writes an unlock as it happens."""
+        if self.current_page == 'trophies':
+            try:
+                self.render_trophies()
+            except Exception:
+                pass
+        self.root.after(1500, self.poll_trophies)
 
     def build_advanced(self):
         f = self.page('advanced', _('Advanced'), _('Maintenance and options for testing.'))

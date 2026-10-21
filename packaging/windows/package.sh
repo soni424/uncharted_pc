@@ -58,7 +58,7 @@ ldd "$dest/bin/bb-probe.exe" "$dest/bin/bb-gpu-capabilities.exe" |
         cp -u "$dll" "$dest/bin/"
     done
 # Only what run.py runs to prepare a game (Bloodborne's patch and mod tools stay out).
-cp scripts/prepare.py scripts/link_modules.py scripts/link_libc.py scripts/content_profile.py scripts/cheats.py "$dest/scripts/"
+cp scripts/prepare.py scripts/link_modules.py scripts/link_libc.py scripts/content_profile.py scripts/cheats.py scripts/trophies.py "$dest/scripts/"
 cp scripts/pkg_game.py scripts/pkg_info.py scripts/pkg_extract.py scripts/pkg_keys.py "$dest/scripts/"
 cp patches/redzone.json "$dest/patches/"  # red-zone-safe guest stores (link_modules.py)
 cp run.py LICENSE "$dest/"

@@ -45,6 +45,10 @@ Starting
   Escape/Enter Options, Tab touchpad. The cursor stays in the game window; hold Left Alt to
   free it. Insert opens the in-game settings menu. Bindings are saved in input.ini.
   Mouse look works in all three games, aiming included, on game versions 1.00 and 1.02.
+- Trophies: the three games' trophy lists are read from sce_sys\trophy\trophy01-03.trp in the game
+  folder. A trophy the game awards shows as a notice at the top of the screen and on the launcher's
+  Trophies page (BB_TROPHY_POPUP=0 in Advanced -> Environment hides the notice). Earned trophies
+  are kept in user\trophy\ with the saves, one list per game.
 
 Data
 - Saves and shader caches: user\ next to Uncharted.exe (the launcher can pick another folder).
